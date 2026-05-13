@@ -1,3 +1,9 @@
+# Python standalone distribution (fetched by scripts/setup_python_standalone.sh).
+# Paths are relative to the workspace root; no manual `export` needed.
+[env]
+PYO3_PYTHON       = { value = "vendor/python-standalone/bin/python3", relative = true }
+BRUSH_PYTHON_HOME = { value = "vendor/python-standalone", relative = true }
+
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
 runner = 'wasm-bindgen-test-runner'

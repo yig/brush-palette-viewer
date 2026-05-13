@@ -15,13 +15,13 @@ cd brush-palette-viewer
 
 ### 2. Set up bundled Python
 
-The viewer calls a Python optimizer (numpy + scipy) via PyO3. No conda or system Python required — `setup_python_standalone.sh` downloads a self-contained Python 3.12 and installs the dependencies into it.
+The viewer calls a Python optimizer (numpy + scipy) via PyO3. No conda or system Python required — run this once to download a self-contained Python 3.12 and install the dependencies:
 
 ```bash
-eval "$(./scripts/setup_python_standalone.sh)"
+./scripts/setup_python_standalone.sh
 ```
 
-This sets `PYO3_PYTHON` and `BRUSH_PYTHON_HOME` in your shell for the build step. Re-run whenever you open a new terminal, or add the two `export` lines it prints to your `~/.zshrc`.
+The paths are wired into `.cargo/config.toml`, so no environment variables need to be set or exported — `cargo build` picks them up automatically after this.
 
 ### 3. Build
 

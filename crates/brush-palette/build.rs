@@ -3,16 +3,20 @@ fn main() {
     println!("cargo:rerun-if-changed=python/constraint_optimizer.py");
 
     let Ok(home) = std::env::var("BRUSH_PYTHON_HOME") else {
-        // Dev mode: PyO3 finds Python normally via PYO3_PYTHON / system python3.
         return;
     };
 
     let home = std::path::Path::new(&home);
-    assert!(
-        home.exists(),
-        "BRUSH_PYTHON_HOME does not exist: {}",
-        home.display()
-    );
+    if !home.exists() {
+        // Point the user at the setup script rather than printing a raw path error.
+        panic!(
+            "\n\nStandalone Python not found at '{}'.\n\
+             Run the setup script once to download it:\n\n  \
+             ./scripts/setup_python_standalone.sh\n\n\
+             After that, `cargo build` will work without any extra exports.\n",
+            home.display()
+        );
+    }
 
     // Help the linker find libpython inside the standalone distribution.
     println!(
