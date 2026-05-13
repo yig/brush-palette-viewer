@@ -13,34 +13,37 @@ git clone https://github.com/tedchao/brush-palette-viewer.git
 cd brush-palette-viewer
 ```
 
-### 2. Conda environment
+### 2. Set up bundled Python
 
-The viewer calls a Python optimizer via pyo3, so the `colorfulgaussians` conda environment must exist before building.
-
-```bash
-conda env create -f environment.yml
-conda activate colorfulgaussians
-```
-
-### 3. Set environment variables
-
-The pyo3 bridge dynamically links to libpython at runtime. Add these to your `~/.zshrc`:
+The viewer calls a Python optimizer (numpy + scipy) via PyO3. No conda or system Python required — `setup_python_standalone.sh` downloads a self-contained Python 3.12 and installs the dependencies into it.
 
 ```bash
-echo 'export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/Caskroom/miniconda/base/envs/colorfulgaussians/lib:$DYLD_FALLBACK_LIBRARY_PATH' >> ~/.zshrc
-echo 'export PYO3_PYTHON=/opt/homebrew/Caskroom/miniconda/base/envs/colorfulgaussians/bin/python' >> ~/.zshrc
-source ~/.zshrc
+eval "$(./scripts/setup_python_standalone.sh)"
 ```
 
-(Adjust the path if your miniconda is installed elsewhere.)
+This sets `PYO3_PYTHON` and `BRUSH_PYTHON_HOME` in your shell for the build step. Re-run whenever you open a new terminal, or add the two `export` lines it prints to your `~/.zshrc`.
 
-### 4. Build
+### 3. Build
 
 ```bash
 cargo build --bin brush
 ```
 
 First build takes a few minutes. Incremental rebuilds are 10-20 seconds.
+
+### Distributing
+
+Bundle the standalone Python alongside the binary so end-users need nothing installed:
+
+```
+your-release/
+├── brush                        ← the binary
+├── python-runtime/              ← vendor/python-standalone/ renamed
+└── python-scripts/              ← crates/brush-palette/python/
+    └── constraint_optimizer.py
+```
+
+The binary's rpath is already wired to find `python-runtime/lib/libpython3.12.dylib` at `@executable_path/python-runtime/lib`.
 
 ### 5. Run
 

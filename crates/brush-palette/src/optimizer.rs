@@ -7,6 +7,55 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use std::path::PathBuf;
 use std::sync::Once;
 
+static PYTHON_HOME_INIT: Once = Once::new();
+
+/// If a `python-runtime/` directory sits next to the running binary (i.e. a
+/// distribution build), point Python at it before the interpreter starts.
+/// Must be called before any `Python::with_gil` call.
+fn init_bundled_python() {
+    PYTHON_HOME_INIT.call_once(|| {
+        // Safety: called exactly once via Once, before any threads that
+        // read env vars are spawned (PyO3 has not initialised yet).
+
+        // Distribution mode: python-runtime/ sits next to the installed binary.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let bundled = dir.join("python-runtime");
+                if bundled.exists() {
+                    unsafe {
+                        std::env::set_var("PYTHONHOME", &bundled);
+                        std::env::remove_var("PYTHONPATH");
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Dev/test mode: honour BRUSH_PYTHON_HOME so Python finds its stdlib
+        // in the vendor directory rather than the baked-in /install/ prefix.
+        if let Ok(home) = std::env::var("BRUSH_PYTHON_HOME") {
+            unsafe {
+                std::env::set_var("PYTHONHOME", home);
+            }
+        }
+    });
+}
+
+/// Returns the directory that contains `constraint_optimizer.py`.
+/// In a distribution build this is `python-scripts/` next to the binary;
+/// during development it is the crate's `python/` source directory.
+fn script_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let dist = dir.join("python-scripts");
+            if dist.exists() {
+                return dist;
+            }
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("python")
+}
+
 #[derive(Debug, Clone)]
 pub struct PixelConstraint {
     pub w_at_pixel: Vec<f32>,
@@ -37,7 +86,7 @@ pub struct OptimizerResult {
 static INIT_PATH: Once = Once::new();
 
 fn ensure_python_path(py: Python) -> PyResult<()> {
-    let python_dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("python");
+    let python_dir: PathBuf = script_dir();
     let sys = py.import_bound("sys")?;
     let path = sys.getattr("path")?;
     let path_list = path.downcast::<PyList>()?;
@@ -183,6 +232,10 @@ pub fn run_optimizer(
     n_curve_samples: usize,
 ) -> Result<OptimizerResult> {
     assert_eq!(palette.len(), k_full * 3);
+
+    // Must run before any Python::with_gil so PYTHONHOME is set before
+    // the interpreter initialises (auto-initialize feature).
+    init_bundled_python();
 
     Python::with_gil(|py| {
         run_optimizer_inner(
