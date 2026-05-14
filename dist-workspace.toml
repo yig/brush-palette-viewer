@@ -11,9 +11,23 @@ ci = "github"
 installers = []
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Bundle the standalone Python runtime and scripts alongside the binary.
+include = ["python-runtime", "python-scripts"]
 
 # Pin GitHub Actions to specific versions
 [dist.github-action-commits]
 "actions/checkout" = "v6"
 "actions/upload-artifact" = "v7"
 "actions/download-artifact" = "v8"
+
+# Steps injected into each platform's build job before `cargo dist build`.
+# Downloads python-build-standalone, installs numpy+scipy, and stages the
+# python-runtime/ and python-scripts/ directories that cargo-dist will
+# include in the release archive.
+[[dist.github.build-setup]]
+shell = "bash"
+run = """
+./scripts/setup_python_standalone.sh
+cp -r vendor/python-standalone python-runtime
+cp -r crates/brush-palette/python python-scripts
+"""

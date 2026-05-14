@@ -18,37 +18,60 @@ fn main() {
         );
     }
 
-    // Help the linker find libpython inside the standalone distribution.
-    println!(
-        "cargo:rustc-link-search=native={}",
-        home.join("lib").display()
-    );
-
-    let lib_dir = home.join("lib");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     match target_os.as_str() {
-        "macos" => {
-            // Dev/test builds: find libpython in the vendor directory directly.
-            println!(
-                "cargo:rustc-link-arg=-Wl,-rpath,{}",
-                lib_dir.display()
-            );
-            // Distribution builds: find libpython relative to the installed binary.
-            println!(
-                "cargo:rustc-link-arg=-Wl,-rpath,@executable_path/python-runtime/lib"
-            );
+        "macos" | "linux" => {
+            let lib_dir = home.join("lib");
+            // Help the linker find libpython inside the standalone distribution.
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+            if target_os == "macos" {
+                // Dev/test builds: find libpython in the vendor directory directly.
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+                // Distribution builds: find libpython relative to the installed binary.
+                println!(
+                    "cargo:rustc-link-arg=-Wl,-rpath,@executable_path/python-runtime/lib"
+                );
+            } else {
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+                // $ORIGIN is resolved by the dynamic linker at load time.
+                println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/python-runtime/lib");
+            }
         }
-        "linux" => {
-            // Dev/test builds.
+        "windows" => {
+            // The import library (.lib) lives in libs/ on Windows.
             println!(
-                "cargo:rustc-link-arg=-Wl,-rpath,{}",
-                lib_dir.display()
+                "cargo:rustc-link-search=native={}",
+                home.join("libs").display()
             );
-            // Distribution builds ($ORIGIN is resolved by the dynamic linker).
-            println!(
-                "cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/python-runtime/lib"
-            );
+            // Delay-load python3XX.dll so init_bundled_python() can call
+            // SetDllDirectoryW before the DLL is first loaded.  Without
+            // delay-load the PE loader would look for the DLL at process
+            // start in the standard search path (exe dir, System32, PATH)
+            // and not find it inside python-runtime/.
+            let dll = python_dll_name(home);
+            println!("cargo:rustc-link-arg=/DELAYLOAD:{}", dll);
+            println!("cargo:rustc-link-lib=delayimp");
         }
         _ => {}
     }
+}
+
+/// Finds the versioned Python DLL (e.g. `python312.dll`) at the root of the
+/// standalone distribution.  Falls back to `python312.dll` if detection fails.
+fn python_dll_name(home: &std::path::Path) -> String {
+    let Ok(entries) = std::fs::read_dir(home) else {
+        return "python312.dll".to_string();
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Match python3XX.dll (version-specific) but not python3.dll (stable-ABI shim).
+        if name.starts_with("python3")
+            && name.ends_with(".dll")
+            && name != "python3.dll"
+        {
+            return name;
+        }
+    }
+    "python312.dll".to_string()
 }

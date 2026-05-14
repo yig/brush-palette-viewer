@@ -5,12 +5,12 @@
 # Run once per host platform before `cargo build --release`:
 #
 #   ./scripts/setup_python_standalone.sh
-#   # then copy-paste the "export …" lines it prints, or source it:
-#   eval "$(./scripts/setup_python_standalone.sh)"
-#   cargo build --release -p brush-app
+#
+# The paths are wired into .cargo/config.toml so no manual `export` is needed.
 #
 # The resulting standalone Python is placed at vendor/python-standalone/.
-# Bundle it with your release artifact as python-runtime/ next to the binary.
+# Bundle it with your release artifact as python-runtime/ next to the binary,
+# and crates/brush-palette/python/ as python-scripts/ next to the binary.
 
 set -euo pipefail
 
@@ -22,11 +22,17 @@ OUTDIR="vendor/python-standalone"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
+# Normalise Windows under Git Bash / MSYS2 / Cygwin.
+case "$OS" in
+    MINGW*|MSYS*|CYGWIN*) OS="Windows" ;;
+esac
+
 case "$OS-$ARCH" in
-    Darwin-arm64)  TRIPLE="aarch64-apple-darwin" ;;
-    Darwin-x86_64) TRIPLE="x86_64-apple-darwin" ;;
-    Linux-x86_64)  TRIPLE="x86_64-unknown-linux-gnu" ;;
-    Linux-aarch64) TRIPLE="aarch64-unknown-linux-gnu" ;;
+    Darwin-arm64)    TRIPLE="aarch64-apple-darwin" ;;
+    Darwin-x86_64)   TRIPLE="x86_64-apple-darwin" ;;
+    Linux-x86_64)    TRIPLE="x86_64-unknown-linux-gnu" ;;
+    Linux-aarch64)   TRIPLE="aarch64-unknown-linux-gnu" ;;
+    Windows-x86_64)  TRIPLE="x86_64-pc-windows-msvc" ;;
     *)
         echo "Unsupported platform: $OS-$ARCH" >&2
         echo "See https://github.com/indygreg/python-build-standalone/releases for available triples." >&2
@@ -61,18 +67,22 @@ else
     echo "✓ Extracted to $OUTDIR" >&2
 fi
 
-# ── Install Python packages ────────────────────────────────────────────────
-PYTHON_BIN="$OUTDIR/bin/python3"
-
-# On macOS the standalone may ship as python3.12 without a python3 symlink.
-if [[ ! -f "$PYTHON_BIN" ]]; then
-    PYTHON_BIN="$(ls "$OUTDIR/bin/python3."* 2>/dev/null | head -1)"
+# ── Locate the Python executable ───────────────────────────────────────────
+if [[ "$OS" == "Windows" ]]; then
+    PYTHON_BIN="$OUTDIR/python.exe"
+else
+    PYTHON_BIN="$OUTDIR/bin/python3"
+    # macOS standalone may ship as python3.12 without a plain python3 symlink.
+    if [[ ! -f "$PYTHON_BIN" ]]; then
+        PYTHON_BIN="$(ls "$OUTDIR/bin/python3."* 2>/dev/null | head -1)"
+    fi
 fi
 if [[ -z "$PYTHON_BIN" || ! -f "$PYTHON_BIN" ]]; then
-    echo "Could not find a python3 binary in $OUTDIR/bin" >&2
+    echo "Could not find a Python binary in $OUTDIR" >&2
     exit 1
 fi
 
+# ── Install Python packages ────────────────────────────────────────────────
 echo "Installing numpy and scipy …" >&2
 "$PYTHON_BIN" -m pip install --quiet --upgrade pip
 "$PYTHON_BIN" -m pip install --quiet numpy scipy
@@ -95,11 +105,3 @@ if [[ "$OS" == "Darwin" ]]; then
         echo "✓ install name fixed and dylib re-signed" >&2
     fi
 fi
-
-# ── Print exports ──────────────────────────────────────────────────────────
-ABS_OUTDIR="$(cd "$OUTDIR" && pwd)"
-
-cat <<EOF
-export PYO3_PYTHON="${ABS_OUTDIR}/bin/python3"
-export BRUSH_PYTHON_HOME="${ABS_OUTDIR}"
-EOF

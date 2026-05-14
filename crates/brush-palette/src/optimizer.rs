@@ -18,27 +18,53 @@ fn init_bundled_python() {
         // read env vars are spawned (PyO3 has not initialised yet).
 
         // Distribution mode: python-runtime/ sits next to the installed binary.
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
+        let python_home = if let Ok(exe) = std::env::current_exe() {
+            exe.parent().and_then(|dir| {
                 let bundled = dir.join("python-runtime");
-                if bundled.exists() {
-                    unsafe {
-                        std::env::set_var("PYTHONHOME", &bundled);
-                        std::env::remove_var("PYTHONPATH");
-                    }
-                    return;
-                }
-            }
+                bundled.exists().then_some(bundled)
+            })
+        } else {
+            None
+        };
+
+        // Dev/test mode: fall back to BRUSH_PYTHON_HOME.
+        let python_home = python_home
+            .or_else(|| std::env::var("BRUSH_PYTHON_HOME").ok().map(Into::into));
+
+        let Some(home) = python_home else { return };
+
+        // On Windows, python312.dll is delay-loaded; tell the loader where to
+        // find it (and python3.dll) inside python-runtime/ before the first
+        // PyO3 GIL acquire triggers the delay-load thunk.
+        #[cfg(target_os = "windows")]
+        // Safety: single-threaded at this point (Once, before PyO3 init).
+        unsafe {
+            set_dll_directory_windows(&home);
         }
 
-        // Dev/test mode: honour BRUSH_PYTHON_HOME so Python finds its stdlib
-        // in the vendor directory rather than the baked-in /install/ prefix.
-        if let Ok(home) = std::env::var("BRUSH_PYTHON_HOME") {
-            unsafe {
-                std::env::set_var("PYTHONHOME", home);
-            }
+        // Safety: same as above.
+        unsafe {
+            std::env::set_var("PYTHONHOME", &home);
+            #[cfg(not(target_os = "windows"))]
+            std::env::remove_var("PYTHONPATH");
         }
     });
+}
+
+/// Adds `path` as the extra DLL search directory for this process so the
+/// Windows loader finds python3XX.dll when the delay-load thunk fires.
+#[cfg(target_os = "windows")]
+unsafe fn set_dll_directory_windows(path: &std::path::Path) {
+    use std::os::windows::ffi::OsStrExt as _;
+    extern "system" {
+        fn SetDllDirectoryW(lp_path_name: *const u16) -> i32;
+    }
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    SetDllDirectoryW(wide.as_ptr());
 }
 
 /// Returns the directory that contains `constraint_optimizer.py`.
