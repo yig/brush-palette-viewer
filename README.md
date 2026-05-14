@@ -2,7 +2,7 @@
 
 A real-time editor for palette-based 3D Gaussian Splatting, forked from [Brush](https://github.com/ArthurBrussee/brush). Edit palette colors and tone curves with the optimizer-driven solver running live in the loop.
 
-**Tested on macOS Apple Silicon only.**
+**Tested on macOS Apple Silicon. Linux (x86-64) and Windows (x86-64) builds are supported but less tested.**
 
 ## Quickstart
 
@@ -33,19 +33,27 @@ First build takes a few minutes. Incremental rebuilds are 10-20 seconds.
 
 ### Distributing
 
-Bundle the standalone Python alongside the binary so end-users need nothing installed:
+**Via CI** — push a version tag and the GitHub Actions workflow builds and packages a release for all three platforms automatically:
 
-```
-your-release/
-├── brush                        ← the binary
-├── python-runtime/              ← vendor/python-standalone/ renamed
-└── python-scripts/              ← crates/brush-palette/python/
-    └── constraint_optimizer.py
+```bash
+git tag v0.3.1 && git push origin v0.3.1
 ```
 
-The binary's rpath is already wired to find `python-runtime/lib/libpython3.12.dylib` at `@executable_path/python-runtime/lib`.
+**Locally** — build in release mode, then copy the standalone Python and scripts alongside the binary:
 
-### 5. Run
+```bash
+cargo build --release --bin brush
+
+DEST=dist/brush-$(uname -s)-$(uname -m)
+mkdir -p "$DEST"
+cp target/release/brush "$DEST/"                     # brush.exe on Windows
+cp -r vendor/python-standalone "$DEST/python-runtime"
+cp -r crates/brush-palette/python "$DEST/python-scripts"
+```
+
+Either way the archive contains the binary alongside `python-runtime/` and `python-scripts/`. End-users need nothing installed.
+
+### 4. Run
 
 Each scene lives in `models/<name>/` as a `name.pply` + `name.gswp` pair. Pass the `.pply` path; the `.gswp` is auto-discovered alongside it.
 
