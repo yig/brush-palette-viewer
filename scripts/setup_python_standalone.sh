@@ -70,6 +70,11 @@ fi
 # ── Locate the Python executable ───────────────────────────────────────────
 if [[ "$OS" == "Windows" ]]; then
     PYTHON_BIN="$OUTDIR/python.exe"
+    # Create bin/python3.exe so the PYO3_PYTHON path in .cargo/config.toml
+    # (vendor/python-standalone/bin/python3) resolves on Windows too.
+    # Windows appends .exe automatically, so bin/python3 → bin/python3.exe.
+    mkdir -p "$OUTDIR/bin"
+    cp "$OUTDIR/python.exe" "$OUTDIR/bin/python3.exe"
 else
     PYTHON_BIN="$OUTDIR/bin/python3"
     # macOS standalone may ship as python3.12 without a plain python3 symlink.
