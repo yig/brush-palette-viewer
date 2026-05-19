@@ -77,6 +77,9 @@ pub(crate) fn connect_device(device: WgpuDevice) {
 /// Try to load and parse the .gswp sidecar associated with a .pply path.
 /// Returns Ok(None) if the sidecar file simply doesn't exist; Err for any
 /// I/O or parse failure.
+/// Not available on WASM — sidecar files live on the local filesystem and
+/// are never reachable from a URL-only source.
+#[cfg(not(target_family = "wasm"))]
 async fn load_palette_sidecar(
     pply_path: &std::path::Path,
     expected_n_splats: u32,
@@ -90,6 +93,37 @@ async fn load_palette_sidecar(
     let bytes = tokio::fs::read(&sidecar_path).await?;
     let sc = brush_palette::PaletteSidecar::parse(&bytes, expected_n_splats)?;
     Ok(Some(sc))
+}
+
+// On WASM, DynRead is not Send (single-threaded runtime; no OS threads).
+// On native, DynRead is Send, so we require it for the stream to be Send.
+#[cfg(not(target_family = "wasm"))]
+fn pin_splat_stream(
+    s: impl tokio_stream::Stream<Item = Result<brush_serde::SplatMessage, brush_serde::DeserializeError>>
+        + Send
+        + 'static,
+) -> Pin<
+    Box<
+        dyn tokio_stream::Stream<
+                Item = Result<brush_serde::SplatMessage, brush_serde::DeserializeError>,
+            > + Send,
+    >,
+> {
+    Box::pin(s)
+}
+
+#[cfg(target_family = "wasm")]
+fn pin_splat_stream(
+    s: impl tokio_stream::Stream<Item = Result<brush_serde::SplatMessage, brush_serde::DeserializeError>>
+        + 'static,
+) -> Pin<
+    Box<
+        dyn tokio_stream::Stream<
+            Item = Result<brush_serde::SplatMessage, brush_serde::DeserializeError>,
+        >,
+    >,
+> {
+    Box::pin(s)
 }
 
 /// Replace the SH coefficients of `splats` with degree-0 only, set to the
@@ -183,6 +217,8 @@ pub fn create_process<
         let initial_config = crate::args_file::load_config_from_vfs(&vfs).await;
         
         // Capture original source path for sidecar resolution (Stage B).
+        // Only used for local-filesystem sidecar loading, which is not available on WASM.
+        #[cfg(not(target_family = "wasm"))]
         let source_path: Option<std::path::PathBuf> = match &source {
             brush_vfs::DataSource::Path(s) => Some(std::path::PathBuf::from(s)),
             _ => None,
@@ -214,15 +250,14 @@ pub fn create_process<
                     }
                 }
 
-                type SplatStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<brush_serde::SplatMessage, brush_serde::DeserializeError>> + Send>>;
-                let mut splat_stream: SplatStream = if is_palette {
-                    Box::pin(brush_palette::stream_pply_as_geometry(
+                let mut splat_stream = if is_palette {
+                    pin_splat_stream(brush_palette::stream_pply_as_geometry(
                         vfs.reader_at_path(path).await?,
                         None,
                         true,
                     ))
                 } else {
-                    Box::pin(brush_serde::stream_splat_from_ply(
+                    pin_splat_stream(brush_serde::stream_splat_from_ply(
                         vfs.reader_at_path(path).await?,
                         None,
                         true,
@@ -246,6 +281,7 @@ pub fn create_process<
                     // sidecar, build a PaletteSplats, probe-call render_palette
                     // (stub), then fall back to Stage B's bake-DC for display
                     // until C2.5c hooks render_palette into the per-frame loop.
+                    #[cfg(not(target_family = "wasm"))]
                     if is_palette {
                         let sidecar_lookup_path = source_path.as_deref().unwrap_or(path.as_path());
                         match load_palette_sidecar(sidecar_lookup_path, splats.num_splats()).await {
