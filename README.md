@@ -92,6 +92,25 @@ python3 -m http.server -d out 8000
 Then open <http://localhost:8000/>. `npm run dev` instead starts a dev server
 with a debug WASM build.
 
+**Hosting on your own server:** the build is a static site, so any web server
+can host it. Set `NEXT_PUBLIC_BASE_PATH` to the URL path it will be served
+from (no trailing slash), then upload the contents of `brush_nextjs/out/` there.
+For `https://example.com/palettegaussian/viewer/`:
+
+```bash
+cd brush_nextjs
+npm run build:wasm-release
+NEXT_PUBLIC_BASE_PATH=/palettegaussian/viewer npx next build --turbopack
+```
+
+The server must:
+
+- use HTTPS, since WebGPU requires a secure context;
+- serve `.wasm` files as `Content-Type: application/wasm`, or the browser
+  refuses to load them (Apache: `AddType application/wasm .wasm`).
+
+Scenes hosted on the same server load without any CORS setup.
+
 ## The constraint optimizer
 
 Palette and tone-curve edits are solved by a native Rust optimizer in
