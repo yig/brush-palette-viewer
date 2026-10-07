@@ -54,6 +54,16 @@ pub enum DataSourceError {
     ReqwestError(#[from] reqwest::Error),
     #[error("WASM fetch error: {0}")]
     FetchError(String),
+    #[error(
+        "Couldn't load {0}: the server doesn't allow cross-origin requests (CORS). \
+         It must send an Access-Control-Allow-Origin header."
+    )]
+    Cors(String),
+    #[error(
+        "Couldn't load {0}: browsers block http:// URLs on an https:// page. \
+         Use an https:// URL."
+    )]
+    MixedContent(String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -275,9 +285,36 @@ async fn wasm_fetch(url: &str) -> Result<web_sys::Response, DataSourceError> {
     let window = web_sys::window()
         .ok_or_else(|| DataSourceError::FetchError("No window object available".to_string()))?;
 
-    let resp_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
+    let page_is_https = window.location().protocol().is_ok_and(|p| p == "https:");
+    if page_is_https && url.starts_with("http://") {
+        return Err(DataSourceError::MixedContent(url.to_owned()));
+    }
+
+    let resp_value = match wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|e| DataSourceError::FetchError(format!("Fetch failed: {:?}", e)))?;
+    {
+        Ok(v) => v,
+        Err(e) => {
+            // Browsers don't say why a fetch failed, so a CORS rejection looks just
+            // like a network error. Probe with a no-cors request: if the server
+            // answers it (with an opaque response), the server is reachable and the
+            // original failure must have been CORS.
+            let probe = RequestInit::new();
+            probe.set_method("HEAD");
+            probe.set_mode(RequestMode::NoCors);
+            let reachable = match Request::new_with_str_and_init(url, &probe) {
+                Ok(req) => wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req))
+                    .await
+                    .is_ok(),
+                Err(_) => false,
+            };
+            return Err(if reachable {
+                DataSourceError::Cors(url.to_owned())
+            } else {
+                DataSourceError::FetchError(format!("Fetch failed: {:?}", e))
+            });
+        }
+    };
 
     resp_value
         .dyn_into::<Response>()
